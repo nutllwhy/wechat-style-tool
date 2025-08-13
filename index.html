@@ -81,13 +81,24 @@
                     <div class="upload-area" id="uploadArea">
                         <div class="upload-icon">📸</div>
                         <p>点击选择图片或拖拽图片到这里</p>
-                        <p class="upload-hint">支持 JPG、PNG、GIF 格式</p>
-                        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                        <p class="upload-hint">支持 JPG、PNG、GIF 格式，可选择多张图片进行批量处理</p>
+                        <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
+                    </div>
+                </div>
+                
+                <div class="batch-preview-section" id="batchPreviewSection" style="display: none;">
+                    <h3>已选择的图片 <span id="imageCount">(0)</span></h3>
+                    <div class="batch-images-grid" id="batchImagesGrid">
+                        <!-- 批量图片预览将在这里显示 -->
+                    </div>
+                    <div class="batch-controls">
+                        <button id="clearAllBtn" class="btn btn-secondary">清空所有</button>
+                        <button id="addMoreBtn" class="btn btn-primary">添加更多图片</button>
                     </div>
                 </div>
                 
                 <div class="style-options" id="styleOptions" style="display: none;">
-                    <h3>选择边框样式</h3>
+                    <h3>选择边框样式（将应用到所有图片）</h3>
                     <div class="style-grid">
                         <div class="style-option" data-style="style1">
                             <div class="style-preview style1-preview"></div>
@@ -110,15 +121,24 @@
                 
                 <div class="preview-section-modal" id="imagePreviewSection" style="display: none;">
                     <h3>预览效果</h3>
-                    <div class="image-preview-container">
-                        <canvas id="previewCanvas"></canvas>
+                    <div class="batch-preview-container" id="batchPreviewContainer">
+                        <!-- 批量预览画布将在这里动态生成 -->
                     </div>
                     <div class="download-section">
-                        <button id="downloadBtn" class="btn btn-success">下载图片</button>
                         <div class="download-options">
                             <label>
                                 <input type="checkbox" id="addWatermark"> 添加水印
                             </label>
+                        </div>
+                        <div class="batch-download-controls">
+                            <button id="downloadAllBtn" class="btn btn-success">批量下载所有图片</button>
+                            <button id="downloadZipBtn" class="btn btn-primary">打包下载 ZIP</button>
+                        </div>
+                        <div class="progress-section" id="progressSection" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                            <p class="progress-text" id="progressText">正在处理图片...</p>
                         </div>
                     </div>
                 </div>
@@ -126,6 +146,8 @@
         </div>
     </div>
 
+    <!-- 引入JSZip库用于ZIP打包功能 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html> 

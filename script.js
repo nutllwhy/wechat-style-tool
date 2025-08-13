@@ -327,7 +327,7 @@ document.querySelector('.footer').innerHTML = `
     <p>欢迎关注作者 小红书/公众号/视频号/即刻/知乎/bilibili @栗噔噔</p>
 `;
 
-// 图片样式转换器功能
+// 图片样式转换器功能（批量处理版本）
 class ImageStyleConverter {
     constructor() {
         this.modal = document.getElementById('imageStyleModal');
@@ -335,11 +335,23 @@ class ImageStyleConverter {
         this.imageInput = document.getElementById('imageInput');
         this.styleOptions = document.getElementById('styleOptions');
         this.imagePreviewSection = document.getElementById('imagePreviewSection');
-        this.previewCanvas = document.getElementById('previewCanvas');
-        this.downloadBtn = document.getElementById('downloadBtn');
         this.addWatermark = document.getElementById('addWatermark');
         
-        this.currentImage = null;
+        // 批量处理相关元素
+        this.batchPreviewSection = document.getElementById('batchPreviewSection');
+        this.batchImagesGrid = document.getElementById('batchImagesGrid');
+        this.imageCount = document.getElementById('imageCount');
+        this.clearAllBtn = document.getElementById('clearAllBtn');
+        this.addMoreBtn = document.getElementById('addMoreBtn');
+        this.batchPreviewContainer = document.getElementById('batchPreviewContainer');
+        this.downloadAllBtn = document.getElementById('downloadAllBtn');
+        this.downloadZipBtn = document.getElementById('downloadZipBtn');
+        this.progressSection = document.getElementById('progressSection');
+        this.progressFill = document.getElementById('progressFill');
+        this.progressText = document.getElementById('progressText');
+        
+        // 存储所有图片的数据
+        this.imageFiles = [];
         this.selectedStyle = 'style1';
         
         this.initEventListeners();
@@ -368,12 +380,22 @@ class ImageStyleConverter {
             this.imageInput.click();
         });
         
-        // 文件选择
+        // 文件选择（支持多文件）
         this.imageInput.addEventListener('change', (e) => {
-            this.handleFileSelect(e.target.files[0]);
+            this.handleFilesSelect(Array.from(e.target.files));
         });
         
-        // 拖拽上传
+        // 添加更多图片按钮
+        this.addMoreBtn.addEventListener('click', () => {
+            this.imageInput.click();
+        });
+        
+        // 清空所有图片按钮
+        this.clearAllBtn.addEventListener('click', () => {
+            this.clearAllImages();
+        });
+        
+        // 拖拽上传（支持多文件）
         this.uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             this.uploadArea.classList.add('dragover');
@@ -386,9 +408,9 @@ class ImageStyleConverter {
         this.uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             this.uploadArea.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) {
-                this.handleFileSelect(file);
+            const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+            if (files.length > 0) {
+                this.handleFilesSelect(files);
             }
         });
         
@@ -399,15 +421,19 @@ class ImageStyleConverter {
             });
         });
         
-        // 下载按钮
-        this.downloadBtn.addEventListener('click', () => {
-            this.downloadImage();
+        // 批量下载按钮
+        this.downloadAllBtn.addEventListener('click', () => {
+            this.downloadAllImages();
+        });
+        
+        this.downloadZipBtn.addEventListener('click', () => {
+            this.downloadAsZip();
         });
         
         // 水印选项变化
         this.addWatermark.addEventListener('change', () => {
-            if (this.currentImage) {
-                this.generatePreview();
+            if (this.imageFiles.length > 0) {
+                this.generateBatchPreview();
             }
         });
     }
@@ -424,11 +450,18 @@ class ImageStyleConverter {
     }
     
     resetModal() {
-        this.currentImage = null;
+        this.imageFiles = [];
         this.styleOptions.style.display = 'none';
         this.imagePreviewSection.style.display = 'none';
+        this.batchPreviewSection.style.display = 'none';
         this.uploadArea.style.display = 'block';
         this.imageInput.value = '';
+        this.progressSection.style.display = 'none';
+        
+        // 清空批量预览网格
+        this.batchImagesGrid.innerHTML = '';
+        this.batchPreviewContainer.innerHTML = '';
+        this.updateImageCount();
         
         // 重置样式选择
         document.querySelectorAll('.style-option').forEach(option => {
@@ -438,31 +471,125 @@ class ImageStyleConverter {
         this.selectedStyle = 'style1';
     }
     
-    handleFileSelect(file) {
-        if (!file || !file.type.startsWith('image/')) {
+    // 批量文件处理
+    async handleFilesSelect(files) {
+        const validFiles = files.filter(file => file.type.startsWith('image/'));
+        
+        if (validFiles.length === 0) {
             alert('请选择有效的图片文件！');
             return;
         }
         
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                this.currentImage = img;
-                this.showStyleOptions();
-            };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
+        // 添加新文件到现有列表中
+        for (const file of validFiles) {
+            // 检查是否已经存在同名文件
+            const existingFile = this.imageFiles.find(item => item.file.name === file.name);
+            if (!existingFile) {
+                try {
+                    const imageData = await this.loadImageFromFile(file);
+                    this.imageFiles.push({
+                        file: file,
+                        image: imageData.image,
+                        dataUrl: imageData.dataUrl,
+                        id: Date.now() + Math.random() // 唯一ID
+                    });
+                } catch (error) {
+                    console.error(`加载图片失败: ${file.name}`, error);
+                }
+            }
+        }
+        
+        if (this.imageFiles.length > 0) {
+            this.showBatchInterface();
+        }
     }
     
-    showStyleOptions() {
+    // 从文件加载图片
+    loadImageFromFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    resolve({
+                        image: img,
+                        dataUrl: e.target.result
+                    });
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    // 显示批量处理界面
+    showBatchInterface() {
         this.uploadArea.style.display = 'none';
+        this.batchPreviewSection.style.display = 'block';
         this.styleOptions.style.display = 'block';
+        
+        // 更新图片预览网格
+        this.updateBatchGrid();
+        this.updateImageCount();
         
         // 默认选择第一个样式
         document.querySelector('[data-style="style1"]').classList.add('selected');
-        this.generatePreview();
+        this.generateBatchPreview();
+    }
+    
+    // 更新图片数量显示
+    updateImageCount() {
+        this.imageCount.textContent = `(${this.imageFiles.length})`;
+    }
+    
+    // 更新批量图片网格显示
+    updateBatchGrid() {
+        this.batchImagesGrid.innerHTML = '';
+        
+        this.imageFiles.forEach((item, index) => {
+            const gridItem = document.createElement('div');
+            gridItem.className = 'batch-image-item';
+            gridItem.innerHTML = `
+                <img src="${item.dataUrl}" alt="${item.file.name}" class="batch-image-preview">
+                <div class="batch-image-name" title="${item.file.name}">${item.file.name}</div>
+                <button class="batch-image-remove" onclick="imageConverter.removeImage(${index})" title="删除">×</button>
+            `;
+            this.batchImagesGrid.appendChild(gridItem);
+        });
+    }
+    
+    // 删除指定图片
+    removeImage(index) {
+        this.imageFiles.splice(index, 1);
+        this.updateBatchGrid();
+        this.updateImageCount();
+        
+        if (this.imageFiles.length === 0) {
+            this.resetToUpload();
+        } else {
+            this.generateBatchPreview();
+        }
+    }
+    
+    // 清空所有图片
+    clearAllImages() {
+        if (confirm('确定要清空所有图片吗？')) {
+            this.imageFiles = [];
+            this.resetToUpload();
+        }
+    }
+    
+    // 重置到上传状态
+    resetToUpload() {
+        this.batchPreviewSection.style.display = 'none';
+        this.styleOptions.style.display = 'none';
+        this.imagePreviewSection.style.display = 'none';
+        this.uploadArea.style.display = 'block';
+        this.updateImageCount();
+        this.batchImagesGrid.innerHTML = '';
+        this.batchPreviewContainer.innerHTML = '';
     }
     
     selectStyle(styleName) {
@@ -473,35 +600,72 @@ class ImageStyleConverter {
         document.querySelector(`[data-style="${styleName}"]`).classList.add('selected');
         
         this.selectedStyle = styleName;
-        this.generatePreview();
+        
+        // 重新生成批量预览
+        if (this.imageFiles.length > 0) {
+            this.generateBatchPreview();
+        }
     }
     
-    generatePreview() {
-        if (!this.currentImage) return;
+    // 生成批量预览
+    generateBatchPreview() {
+        if (this.imageFiles.length === 0) return;
         
-        const canvas = this.previewCanvas;
+        this.batchPreviewContainer.innerHTML = '';
+        
+        this.imageFiles.forEach((item, index) => {
+            const canvasContainer = document.createElement('div');
+            canvasContainer.className = 'batch-canvas-item';
+            
+            const canvas = document.createElement('canvas');
+            const canvasName = document.createElement('div');
+            canvasName.className = 'canvas-name';
+            canvasName.textContent = item.file.name;
+            
+            canvasContainer.appendChild(canvas);
+            canvasContainer.appendChild(canvasName);
+            this.batchPreviewContainer.appendChild(canvasContainer);
+            
+            // 为每个图片生成预览
+            this.generateSinglePreview(canvas, item.image, item.file.name);
+        });
+        
+        // 显示预览区域
+        this.imagePreviewSection.style.display = 'block';
+    }
+    
+    // 生成单个图片预览
+    generateSinglePreview(canvas, image, fileName) {
         const ctx = canvas.getContext('2d');
         
-        // 计算合适的画布尺寸
-        const maxSize = 400;
-        const outerBorderWidth = 5;  // 外边框宽度（更细）
-        const whiteBorderWidth = 4;  // 白色内边框宽度
+        // 计算合适的画布尺寸 - 提高预览质量
+        const maxSize = 500; // 增加预览尺寸以保持清晰度
+        const outerBorderWidth = 6;
+        const whiteBorderWidth = 5;
         const totalBorderWidth = outerBorderWidth + whiteBorderWidth;
         const cornerRadius = 12;
         const innerCornerRadius = 8;
         
-        let { width, height } = this.currentImage;
+        let { width, height } = image;
         
-        // 保持比例缩放
+        // 保持原始比例，但确保最小尺寸
+        const minSize = 200; // 设置最小尺寸防止过度压缩
+        
         if (width > height) {
             if (width > maxSize) {
                 height = (height * maxSize) / width;
                 width = maxSize;
+            } else if (width < minSize) {
+                height = (height * minSize) / width;
+                width = minSize;
             }
         } else {
             if (height > maxSize) {
                 width = (width * maxSize) / height;
                 height = maxSize;
+            } else if (height < minSize) {
+                width = (width * minSize) / height;
+                height = minSize;
             }
         }
         
@@ -509,6 +673,10 @@ class ImageStyleConverter {
         const shadowOffset = 4;
         canvas.width = width + totalBorderWidth * 2 + shadowOffset;
         canvas.height = height + totalBorderWidth * 2 + shadowOffset;
+        
+        // 启用高质量缩放
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         
         // 清除画布
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -523,15 +691,12 @@ class ImageStyleConverter {
         this.drawWhiteBorder(ctx, outerBorderWidth, outerBorderWidth, width + whiteBorderWidth * 2, height + whiteBorderWidth * 2, innerCornerRadius + 2);
         
         // 绘制圆角图片
-        this.drawRoundedImage(ctx, this.currentImage, totalBorderWidth, totalBorderWidth, width, height, innerCornerRadius);
+        this.drawRoundedImage(ctx, image, totalBorderWidth, totalBorderWidth, width, height, innerCornerRadius);
         
         // 添加水印（如果选中）
         if (this.addWatermark.checked) {
             this.drawWatermark(ctx, canvas.width, canvas.height);
         }
-        
-        // 显示预览区域
-        this.imagePreviewSection.style.display = 'block';
     }
     
     drawShadow(ctx, x, y, width, height, cornerRadius) {
@@ -603,6 +768,10 @@ class ImageStyleConverter {
     drawRoundedImage(ctx, img, x, y, width, height, radius) {
         ctx.save();
         
+        // 启用高质量缩放
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
         // 创建圆角裁剪路径
         this.roundRect(ctx, x, y, width, height, radius);
         ctx.clip();
@@ -650,66 +819,256 @@ class ImageStyleConverter {
         ctx.closePath();
     }
     
-    downloadImage() {
-        if (!this.currentImage) return;
+    // 批量下载所有图片
+    async downloadAllImages() {
+        if (this.imageFiles.length === 0) return;
         
-        // 创建高分辨率画布用于下载
-        const downloadCanvas = document.createElement('canvas');
-        const downloadCtx = downloadCanvas.getContext('2d');
+        this.showProgress(true);
+        this.updateProgress(0, '开始处理图片...');
         
-        // 使用更高的分辨率
-        const scale = 2; // 2倍分辨率
-        const maxSize = 800; // 更大的最大尺寸
-        const outerBorderWidth = 10;
-        const whiteBorderWidth = 8;
-        const totalBorderWidth = outerBorderWidth + whiteBorderWidth;
-        const cornerRadius = 24;
-        const innerCornerRadius = 16;
-        
-        let { width, height } = this.currentImage;
-        
-        // 保持比例缩放到更高分辨率
-        if (width > height) {
-            if (width > maxSize) {
-                height = (height * maxSize) / width;
-                width = maxSize;
-            }
-        } else {
-            if (height > maxSize) {
-                width = (width * maxSize) / height;
-                height = maxSize;
+        for (let i = 0; i < this.imageFiles.length; i++) {
+            const item = this.imageFiles[i];
+            const progress = ((i + 1) / this.imageFiles.length) * 100;
+            
+            this.updateProgress(progress, `正在处理: ${item.file.name} (${i + 1}/${this.imageFiles.length})`);
+            
+            try {
+                await this.downloadSingleImage(item.image, item.file.name);
+                // 添加小延迟以避免浏览器阻止多个下载
+                await this.delay(500);
+            } catch (error) {
+                console.error(`下载失败: ${item.file.name}`, error);
             }
         }
         
-        const shadowOffset = 8;
-        downloadCanvas.width = width + totalBorderWidth * 2 + shadowOffset;
-        downloadCanvas.height = height + totalBorderWidth * 2 + shadowOffset;
-        
-        // 清除画布
-        downloadCtx.clearRect(0, 0, downloadCanvas.width, downloadCanvas.height);
-        
-        // 使用相同的绘制逻辑但参数更大
-        this.drawShadowHD(downloadCtx, shadowOffset, shadowOffset, width + totalBorderWidth * 2, height + totalBorderWidth * 2, cornerRadius);
-        this.drawBorderHD(downloadCtx, 0, 0, width + totalBorderWidth * 2, height + totalBorderWidth * 2, cornerRadius);
-        this.drawWhiteBorderHD(downloadCtx, outerBorderWidth, outerBorderWidth, width + whiteBorderWidth * 2, height + whiteBorderWidth * 2, innerCornerRadius + 4);
-        this.drawRoundedImageHD(downloadCtx, this.currentImage, totalBorderWidth, totalBorderWidth, width, height, innerCornerRadius);
-        
-        if (this.addWatermark.checked) {
-            this.drawWatermarkHD(downloadCtx, downloadCanvas.width, downloadCanvas.height);
+        this.updateProgress(100, '所有图片处理完成！');
+        setTimeout(() => {
+            this.showProgress(false);
+            this.showDownloadSuccess();
+        }, 1000);
+    }
+    
+    // 下载单个图片（高清版本）
+    downloadSingleImage(image, fileName) {
+        return new Promise((resolve) => {
+            // 创建高分辨率画布用于下载
+            const downloadCanvas = document.createElement('canvas');
+            const downloadCtx = downloadCanvas.getContext('2d');
+            
+            // 大幅提高分辨率，保持原图质量
+            const maxSize = 2000; // 大幅提高最大尺寸
+            const minSize = 800;  // 设置最小尺寸，确保小图也有足够清晰度
+            const outerBorderWidth = 20; // 增大边框宽度以匹配高分辨率
+            const whiteBorderWidth = 16;
+            const totalBorderWidth = outerBorderWidth + whiteBorderWidth;
+            const cornerRadius = 48; // 增大圆角半径
+            const innerCornerRadius = 32;
+            
+            let { width, height } = image;
+            
+            // 优化缩放逻辑，尽量保持原始分辨率
+            const scale = Math.min(maxSize / Math.max(width, height), 2); // 最多放大2倍
+            
+            if (scale < 1) {
+                // 只有在原图太大时才缩小
+                width = width * scale;
+                height = height * scale;
+            } else if (Math.max(width, height) < minSize) {
+                // 如果原图太小，适度放大到最小尺寸
+                const upscale = minSize / Math.max(width, height);
+                width = width * upscale;
+                height = height * upscale;
+            }
+            
+            const shadowOffset = 16;
+            downloadCanvas.width = width + totalBorderWidth * 2 + shadowOffset;
+            downloadCanvas.height = height + totalBorderWidth * 2 + shadowOffset;
+            
+            // 启用最高质量设置
+            downloadCtx.imageSmoothingEnabled = true;
+            downloadCtx.imageSmoothingQuality = 'high';
+            
+            // 清除画布
+            downloadCtx.clearRect(0, 0, downloadCanvas.width, downloadCanvas.height);
+            
+            // 使用高清绘制逻辑
+            this.drawShadowHD(downloadCtx, shadowOffset, shadowOffset, width + totalBorderWidth * 2, height + totalBorderWidth * 2, cornerRadius);
+            this.drawBorderHD(downloadCtx, 0, 0, width + totalBorderWidth * 2, height + totalBorderWidth * 2, cornerRadius);
+            this.drawWhiteBorderHD(downloadCtx, outerBorderWidth, outerBorderWidth, width + whiteBorderWidth * 2, height + whiteBorderWidth * 2, innerCornerRadius + 8);
+            this.drawRoundedImageHD(downloadCtx, image, totalBorderWidth, totalBorderWidth, width, height, innerCornerRadius);
+            
+            if (this.addWatermark.checked) {
+                this.drawWatermarkHD(downloadCtx, downloadCanvas.width, downloadCanvas.height);
+            }
+            
+            // 创建下载链接
+            const link = document.createElement('a');
+            const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
+            link.download = `styled-${fileNameWithoutExt}-${this.selectedStyle}.png`;
+            link.href = downloadCanvas.toDataURL('image/png', 1.0);
+            
+            // 触发下载
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            resolve();
+        });
+    }
+    
+    // 打包下载为ZIP
+    async downloadAsZip() {
+        if (this.imageFiles.length === 0) {
+            alert('请先选择要处理的图片！');
+            return;
         }
         
-        // 创建下载链接
-        const link = document.createElement('a');
-        link.download = `styled-image-${this.selectedStyle}-${Date.now()}.png`;
-        link.href = downloadCanvas.toDataURL('image/png', 1.0);
+        // 检查JSZip是否可用
+        if (typeof JSZip === 'undefined') {
+            alert('ZIP功能库加载失败，请刷新页面重试或使用"批量下载所有图片"功能。');
+            return;
+        }
         
-        // 触发下载
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        this.showProgress(true);
+        this.updateProgress(0, '开始创建ZIP包...');
         
-        // 显示成功提示
-        this.showDownloadSuccess();
+        try {
+            const zip = new JSZip();
+            const folder = zip.folder(`styled-images-${this.selectedStyle}`);
+            
+            // 为每张图片生成高清版本并添加到ZIP
+            for (let i = 0; i < this.imageFiles.length; i++) {
+                const item = this.imageFiles[i];
+                const progress = ((i + 1) / this.imageFiles.length) * 80; // 80%用于处理图片
+                
+                this.updateProgress(progress, `正在处理: ${item.file.name} (${i + 1}/${this.imageFiles.length})`);
+                
+                try {
+                    // 生成高清图片的base64数据
+                    const imageBlob = await this.generateHighQualityImageBlob(item.image, item.file.name);
+                    const fileNameWithoutExt = item.file.name.replace(/\.[^/.]+$/, "");
+                    const fileName = `styled-${fileNameWithoutExt}-${this.selectedStyle}.png`;
+                    
+                    // 添加到ZIP文件夹
+                    folder.file(fileName, imageBlob);
+                    
+                } catch (error) {
+                    console.error(`处理图片失败: ${item.file.name}`, error);
+                }
+            }
+            
+            this.updateProgress(90, '正在生成ZIP文件...');
+            
+            // 生成ZIP文件
+            const zipBlob = await zip.generateAsync({
+                type: "blob",
+                compression: "DEFLATE",
+                compressionOptions: {
+                    level: 6
+                }
+            });
+            
+            this.updateProgress(95, '准备下载...');
+            
+            // 创建下载链接
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(zipBlob);
+            link.download = `styled-images-${this.selectedStyle}-${new Date().toISOString().slice(0, 10)}.zip`;
+            
+            // 触发下载
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // 清理URL对象
+            URL.revokeObjectURL(link.href);
+            
+            this.updateProgress(100, 'ZIP文件下载完成！');
+            
+            setTimeout(() => {
+                this.showProgress(false);
+                this.showDownloadSuccess();
+            }, 1000);
+            
+        } catch (error) {
+            console.error('ZIP生成失败:', error);
+            alert('ZIP文件生成失败，请重试或使用批量下载功能。');
+            this.showProgress(false);
+        }
+    }
+    
+    // 生成高质量图片的Blob
+    generateHighQualityImageBlob(image, fileName) {
+        return new Promise((resolve) => {
+            // 创建超高分辨率画布
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // 使用超高分辨率设置
+            const maxSize = 2000; // 与单个下载保持一致
+            const minSize = 800;
+            const outerBorderWidth = 20;
+            const whiteBorderWidth = 16;
+            const totalBorderWidth = outerBorderWidth + whiteBorderWidth;
+            const cornerRadius = 48;
+            const innerCornerRadius = 32;
+            
+            let { width, height } = image;
+            
+            // 使用与单个下载相同的优化缩放逻辑
+            const scale = Math.min(maxSize / Math.max(width, height), 2);
+            
+            if (scale < 1) {
+                width = width * scale;
+                height = height * scale;
+            } else if (Math.max(width, height) < minSize) {
+                const upscale = minSize / Math.max(width, height);
+                width = width * upscale;
+                height = height * upscale;
+            }
+            
+            const shadowOffset = 16;
+            canvas.width = width + totalBorderWidth * 2 + shadowOffset;
+            canvas.height = height + totalBorderWidth * 2 + shadowOffset;
+            
+            // 启用最高质量设置
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            
+            // 清除画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制图片效果
+            this.drawShadowHD(ctx, shadowOffset, shadowOffset, width + totalBorderWidth * 2, height + totalBorderWidth * 2, cornerRadius);
+            this.drawBorderHD(ctx, 0, 0, width + totalBorderWidth * 2, height + totalBorderWidth * 2, cornerRadius);
+            this.drawWhiteBorderHD(ctx, outerBorderWidth, outerBorderWidth, width + whiteBorderWidth * 2, height + whiteBorderWidth * 2, innerCornerRadius + 8);
+            this.drawRoundedImageHD(ctx, image, totalBorderWidth, totalBorderWidth, width, height, innerCornerRadius);
+            
+            if (this.addWatermark.checked) {
+                this.drawWatermarkHD(ctx, canvas.width, canvas.height);
+            }
+            
+            // 转换为高质量Blob
+            canvas.toBlob((blob) => {
+                resolve(blob);
+            }, 'image/png', 1.0);
+        });
+    }
+    
+    // 显示/隐藏进度条
+    showProgress(show) {
+        this.progressSection.style.display = show ? 'block' : 'none';
+    }
+    
+    // 更新进度
+    updateProgress(percent, text) {
+        this.progressFill.style.width = `${percent}%`;
+        this.progressText.textContent = text;
+    }
+    
+    // 延迟函数
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
     
     // 高清版本的绘制方法
@@ -775,6 +1134,11 @@ class ImageStyleConverter {
     
     drawRoundedImageHD(ctx, img, x, y, width, height, radius) {
         ctx.save();
+        
+        // 启用最高质量设置
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
         this.roundRect(ctx, x, y, width, height, radius);
         ctx.clip();
         ctx.drawImage(img, x, y, width, height);
@@ -784,17 +1148,21 @@ class ImageStyleConverter {
     drawWatermarkHD(ctx, canvasWidth, canvasHeight) {
         ctx.save();
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.font = '24px PingFang SC, sans-serif';
+        
+        // 根据画布大小动态调整字体大小
+        const fontSize = Math.max(24, Math.min(canvasWidth, canvasHeight) * 0.025);
+        ctx.font = `${fontSize}px PingFang SC, sans-serif`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
+        ctx.shadowBlur = fontSize * 0.2;
+        ctx.shadowOffsetX = fontSize * 0.1;
+        ctx.shadowOffsetY = fontSize * 0.1;
         
         const watermarkText = '微信公众号样式工具';
-        const shadowOffset = 8;
-        ctx.fillText(watermarkText, canvasWidth - shadowOffset - 16, canvasHeight - shadowOffset - 16);
+        const shadowOffset = 16;
+        const margin = fontSize * 0.8;
+        ctx.fillText(watermarkText, canvasWidth - shadowOffset - margin, canvasHeight - shadowOffset - margin);
         ctx.restore();
     }
     
@@ -811,10 +1179,12 @@ class ImageStyleConverter {
 }
 
 // 初始化图片样式转换器
+let imageConverter; // 全局变量，供HTML中的onclick事件使用
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-        new ImageStyleConverter();
+        imageConverter = new ImageStyleConverter();
     });
 } else {
-    new ImageStyleConverter();
+    imageConverter = new ImageStyleConverter();
 } 
